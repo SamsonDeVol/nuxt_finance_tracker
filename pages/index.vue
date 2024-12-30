@@ -8,10 +8,10 @@
   </section>
 
   <section class="grid gird-cols-1 sm:grid-cols-2 lg:grid-cols-4 sm:gap-16 mb-10">
-    <Trend color="green" title="Income" :amount="incomeTotal" :last-amount="3000" :loading="isLoading"/>
-    <Trend color="red" title="Expense" :amount="expenseTotal" :last-amount="3000" :loading="isLoading"/>
-    <Trend color="green" title="Investments" :amount="4000" :last-amount="3000" :loading="isLoading"/>
-    <Trend color="red" title="Savings" :amount="4000" :last-amount="6000" :loading="isLoading"/>
+    <Trend color="green" title="Income" :amount="incomeTotal" :last-amount="previousIncomeTotal" :loading="pending"/>
+    <Trend color="red" title="Expense" :amount="expenseTotal" :last-amount="previousExpenseTotal" :loading="pending"/>
+    <Trend color="green" title="Investments" :amount="4000" :last-amount="3000" :loading="pending"/>
+    <Trend color="red" title="Savings" :amount="4000" :last-amount="6000" :loading="pending"/>
   </section>
 
   <section class="flex justify-between mb-10">
@@ -22,15 +22,15 @@
       </div>
     </div>
     <div>
-      <TransactionModel v-model="isOpen" @saved="refreshTransactions()"/>
+      <TransactionModel v-model="isOpen" @saved="refresh()"/>
       <UButton icon="i-heroicons-plus-circle" color="white" variant="solid" label="Add" @click="isOpen = true"/>
     </div>
   </section>
 
-  <section v-if="!isLoading">
-    <div v-for="(transactionsOnDay, date) in transactionsGroupedByDate" :key="date" class="mb-10">
+  <section v-if="!pending">
+    <div v-for="(transactionsOnDay, date) in byDate" :key="date" class="mb-10">
       <DailyTransactionSummary :date="date" :transactions="transactionsOnDay"/>
-      <Transaction v-for="transaction in transactionsOnDay" :key="transaction.id" :transaction="transaction" @deleted="refreshTransactions()"/>
+      <Transaction v-for="transaction in transactionsOnDay" :key="transaction.id" :transaction="transaction" @deleted="refresh()" @edited="refresh()"/>
     </div>
   </section>
   <section v-else>
@@ -40,76 +40,28 @@
 
 <script setup>
 import {transactionViewOptions} from "~/constants.js";
-const selectedView = ref(transactionViewOptions[1])
 
-const supabase = useSupabaseClient()
+const user = useSupabaseUser()
 
-const transactions = ref([])
-const isLoading = ref(false)
+const selectedView = ref(user.value.user_metadata?.transaction_view ?? transactionViewOptions[1])
 const isOpen = ref(false)
-const income = computed(
-    () => transactions.value.filter(t => t.type === 'Income')
-)
+const { current, previous } = useSelectedTimePeriod(selectedView)
 
-const expense = computed(
-    () => transactions.value.filter(t => t.type === 'Expense')
-)
-
-const incomeCount = computed(() => income.length)
-const expenseCount = computed(() => expense.length)
-
-const incomeTotal = computed(
-    () => income.value.reduce((sum, transaction) => sum + transaction.amount, 0)
-)
-
-const expenseTotal = computed(
-    () => expense.value.reduce((sum, transaction) => sum + transaction.amount, 0)
-)
-
-const fetchTransactions = async () => {
-  isLoading.value = true
-  try {
-    const {data} = await useAsyncData('transactions', async () => {
-      const {data, error} = await supabase
-          .from('transactions')
-          .select()
-          .order('created_at', { ascending: false })
-      if (error) return []
-      return data
-    })
-    return data.value
-  } finally {
-    isLoading.value = false
-  }
-}
-
-const refreshTransactions = async () => transactions.value = await fetchTransactions()
-
-await refreshTransactions()
-
-transactions.value = await fetchTransactions()
-
-const transactionsGroupedByDate = computed(() => {
-  let grouped = {}
-
-  for (const transaction of transactions.value){
-    const date = new Date(transaction.created_at).toISOString().split('T', )[0]
-
-    if (!grouped[date]) {
-      grouped[date] = []
+const { pending, refresh, transactions: {
+  incomeCount,
+    expenseCount,
+    incomeTotal,
+    expenseTotal,
+    grouped: {
+      byDate
     }
-    grouped[date].push(transaction)
-  }
+}} = useFetchTransactions(current)
 
-  // const sortedKeys = Object.keys(grouped).sort().reverse()
-  // const sortedGrouped = {}
-  //
-  // for (const key of sortedKeys) {
-  //   sortedGrouped[key] = grouped[key]
-  // }
-  //
-  // return sortedGrouped
-  return grouped
-})
-console.log(transactionsGroupedByDate.value)
+const { refresh: refreshPrevious, transactions: {
+  incomeTotal: previousIncomeTotal,
+  expenseTotal: previousExpenseTotal,
+}} = useFetchTransactions(previous)
+
+await Promise.all([refresh(), refreshPrevious()])
+
 </script>
